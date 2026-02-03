@@ -161,10 +161,6 @@ namespace gamescope
 			*pPrimaryPlaneFormat = VulkanFormatToDRM( VK_FORMAT_A2B10G10R10_UNORM_PACK32 );
 			*pOverlayPlaneFormat = VulkanFormatToDRM( VK_FORMAT_B8G8R8A8_UNORM );
 		}
-		virtual bool ValidPhysicalDevice( VkPhysicalDevice pVkPhysicalDevice ) const override
-		{
-			return true;
-		}
 
 		virtual void DirtyState( bool bForce, bool bForceModeset ) override
 		{

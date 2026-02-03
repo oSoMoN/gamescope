@@ -420,7 +420,6 @@ bool vulkan_remake_swapchain( void );
 bool vulkan_remake_output_images( void );
 bool acquire_next_image( void );
 
-bool vulkan_primary_dev_id(dev_t *id);
 bool vulkan_supports_modifiers(void);
 
 gamescope::Rc<CVulkanTexture> vulkan_create_1d_lut(uint32_t size);
@@ -799,10 +798,7 @@ public:
 	inline uint32_t generalQueueFamily() {return m_generalQueueFamily;}
 	inline VkBuffer uploadBuffer() {return m_uploadBuffer;}
 	inline VkPipelineLayout pipelineLayout() {return m_pipelineLayout;}
-	inline int drmRenderFd() {return m_drmRendererFd;}
 	inline bool supportsModifiers() {return m_bSupportsModifiers;}
-	inline bool hasDrmPrimaryDevId() {return m_bHasDrmPrimaryDevId;}
-	inline dev_t primaryDevId() {return m_drmPrimaryDevId;}
 	inline bool supportsFp16() {return m_bSupportsFp16;}
 
 	inline std::pair<void *, uint32_t> uploadBufferData(uint32_t size)
@@ -861,11 +857,7 @@ protected:
 	uint32_t m_queueFamily = -1;
 	uint32_t m_generalQueueFamily = -1;
 
-	int m_drmRendererFd = -1;
-	dev_t m_drmPrimaryDevId = 0;
-
 	bool m_bSupportsFp16 = false;
-	bool m_bHasDrmPrimaryDevId = false;
 	bool m_bSupportsModifiers = false;
 	bool m_bInitialized = false;
 

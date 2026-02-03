@@ -18,7 +18,7 @@ namespace gamescope
     {
         int32_t nRet;
         uint32_t uHandle = 0;
-        if ( ( nRet = drmSyncobjFDToHandle( g_device.drmRenderFd(), nFd, &uHandle ) ) < 0 )
+        if ( ( nRet = drmSyncobjFDToHandle( GetBackend()->GetDrmRenderFD(), nFd, &uHandle ) ) < 0 )
             return 0;
 
         return uHandle;
@@ -57,7 +57,7 @@ namespace gamescope
 
     int32_t CTimeline::GetDrmRenderFD()
     {
-        return g_device.drmRenderFd();
+        return GetBackend()->GetDrmRenderFD();
     }
 
     std::shared_ptr<VulkanTimelineSemaphore_t> CTimeline::ToVkSemaphore()

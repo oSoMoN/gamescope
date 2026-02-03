@@ -14,10 +14,6 @@
 #include "vulkan_include.h"
 #include "Utils/Algorithm.h"
 
-#if defined(__linux__)
-#include <sys/sysmacros.h>
-#endif
-
 // Used to remove the config struct alignment specified by the NIS header
 #define NIS_ALIGNED(x)
 // NIS_Config needs to be included before the X11 headers because of conflicting defines introduced by X11
@@ -439,7 +435,6 @@ bool CVulkanDevice::createDevice()
 	std::vector<VkExtensionProperties> supportedExts(supportedExtensionCount);
 	vk.EnumerateDeviceExtensionProperties( physDev(), NULL, &supportedExtensionCount, supportedExts.data() );
 
-	bool hasDrmProps = false;
 	bool supportsForeignQueue = false;
 	bool supportsHDRMetadata = false;
 	for ( uint32_t i = 0; i < supportedExtensionCount; ++i )
@@ -447,10 +442,6 @@ bool CVulkanDevice::createDevice()
 		if ( strcmp(supportedExts[i].extensionName,
 		     VK_EXT_IMAGE_DRM_FORMAT_MODIFIER_EXTENSION_NAME) == 0 )
 			m_bSupportsModifiers = true;
-
-		if ( strcmp(supportedExts[i].extensionName,
-		            VK_EXT_PHYSICAL_DEVICE_DRM_EXTENSION_NAME) == 0 )
-			hasDrmProps = true;
 
 		if ( strcmp(supportedExts[i].extensionName,
 		     VK_EXT_QUEUE_FAMILY_FOREIGN_EXTENSION_NAME) == 0 )
@@ -465,57 +456,6 @@ bool CVulkanDevice::createDevice()
 
 	if ( !GetBackend()->ValidPhysicalDevice( physDev() ) )
 		return false;
-
-#if HAVE_DRM
-	// XXX(JoshA): Move this to ValidPhysicalDevice.
-	// We need to refactor some Vulkan stuff to do that though.
-	if ( hasDrmProps )
-	{
-		VkPhysicalDeviceDrmPropertiesEXT drmProps = {
-			.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRM_PROPERTIES_EXT,
-		};
-		VkPhysicalDeviceProperties2 props2 = {
-			.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
-			.pNext = &drmProps,
-		};
-		vk.GetPhysicalDeviceProperties2( physDev(), &props2 );
-
-		if ( !GetBackend()->UsesVulkanSwapchain() && !drmProps.hasPrimary ) {
-			vk_log.errorf( "physical device has no primary node" );
-			return false;
-		}
-		if ( !drmProps.hasRender ) {
-			vk_log.errorf( "physical device has no render node" );
-			return false;
-		}
-
-		dev_t renderDevId = makedev( drmProps.renderMajor, drmProps.renderMinor );
-		drmDevice *drmDev = nullptr;
-		if (drmGetDeviceFromDevId(renderDevId, 0, &drmDev) != 0) {
-			vk_log.errorf( "drmGetDeviceFromDevId() failed" );
-			return false;
-		}
-		assert(drmDev->available_nodes & (1 << DRM_NODE_RENDER));
-		const char *drmRenderName = drmDev->nodes[DRM_NODE_RENDER];
-
-		m_drmRendererFd = open( drmRenderName, O_RDWR | O_CLOEXEC );
-		drmFreeDevice(&drmDev);
-		if ( m_drmRendererFd < 0 ) {
-			vk_log.errorf_errno( "failed to open DRM render node" );
-			return false;
-		}
-
-		if ( drmProps.hasPrimary ) {
-			m_bHasDrmPrimaryDevId = true;
-			m_drmPrimaryDevId = makedev( drmProps.primaryMajor, drmProps.primaryMinor );
-		}
-	}
-	else
-#endif
-	{
-		vk_log.errorf( "physical device doesn't support VK_EXT_physical_device_drm" );
-		return false;
-	}
 
 	if ( m_bSupportsModifiers && !supportsForeignQueue ) {
 		vk_log.infof( "The vulkan driver does not support foreign queues,"
@@ -4213,12 +4153,6 @@ gamescope::Rc<CVulkanTexture> vulkan_get_last_output_image( bool partial, bool d
 	return g_output.outputImages[ nOutImage ];
 }
 
-bool vulkan_primary_dev_id(dev_t *id)
-{
-	*id = g_device.primaryDevId();
-	return g_device.hasDrmPrimaryDevId();
-}
-
 bool vulkan_supports_modifiers(void)
 {
 	return g_device.supportsModifiers();
@@ -4253,7 +4187,7 @@ static const struct wlr_drm_format_set *renderer_get_texture_formats( struct wlr
 
 static int renderer_get_drm_fd( struct wlr_renderer *wlr_renderer )
 {
-	return g_device.drmRenderFd();
+	return GetBackend()->GetDrmRenderFD();
 }
 
 static struct wlr_texture *renderer_texture_from_buffer( struct wlr_renderer *wlr_renderer, struct wlr_buffer *buf )

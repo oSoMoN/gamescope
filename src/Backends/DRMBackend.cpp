@@ -27,6 +27,10 @@
 #include <utility>
 #include <vector>
 
+#if defined(__linux__)
+#include <sys/sysmacros.h>
+#endif
+
 #include "backend.h"
 #include "color_helpers.h"
 #include "Utils/Defer.h"
@@ -1193,7 +1197,7 @@ gamescope_liftoff_log_handler(enum liftoff_log_priority liftoff_priority, const 
 	liftoff_log_scope.vlogf(priority, fmt, args);
 }
 
-bool init_drm(struct drm_t *drm, int width, int height, int refresh)
+bool init_drm(struct drm_t *drm, int width, int height, int refresh, dev_t primary_dev_id)
 {
 	load_pnps();
 
@@ -1204,21 +1208,14 @@ bool init_drm(struct drm_t *drm, int width, int height, int refresh)
 	drm->preferred_refresh = refresh;
 
 	drm->device_name = nullptr;
-	dev_t dev_id = 0;
-	if (vulkan_primary_dev_id(&dev_id)) {
-		drmDevice *drm_dev = nullptr;
-		if (drmGetDeviceFromDevId(dev_id, 0, &drm_dev) != 0) {
-			drm_log.errorf("Failed to find DRM device with device ID %" PRIu64, (uint64_t)dev_id);
-			return false;
-		}
-		assert(drm_dev->available_nodes & (1 << DRM_NODE_PRIMARY));
-		drm->device_name = strdup(drm_dev->nodes[DRM_NODE_PRIMARY]);
-		drm_log.infof("opening DRM node '%s'", drm->device_name);
+	drmDevice *drm_dev = nullptr;
+	if (drmGetDeviceFromDevId(primary_dev_id, 0, &drm_dev) != 0) {
+		drm_log.errorf("Failed to find DRM device with device ID %" PRIu64, (uint64_t)primary_dev_id);
+		return false;
 	}
-	else
-	{
-		drm_log.infof("warning: picking an arbitrary DRM device");
-	}
+	assert(drm_dev->available_nodes & (1 << DRM_NODE_PRIMARY));
+	drm->device_name = strdup(drm_dev->nodes[DRM_NODE_PRIMARY]);
+	drm_log.infof("opening DRM node '%s'", drm->device_name);
 
 	drm->fd = wlsession_open_kms( drm->device_name );
 	if ( drm->fd < 0 )
@@ -3394,7 +3391,7 @@ namespace gamescope
 				return false;
 			}
 
-			return init_drm( &g_DRM, g_nPreferredOutputWidth, g_nPreferredOutputHeight, g_nNestedRefresh );
+			return init_drm( &g_DRM, g_nPreferredOutputWidth, g_nPreferredOutputHeight, g_nNestedRefresh, m_drmPrimaryDevId );
 		}
 
 		virtual bool PostInit() override
@@ -3424,8 +3421,61 @@ namespace gamescope
 			*pPrimaryPlaneFormat = g_nDRMFormat;
 			*pOverlayPlaneFormat = g_nDRMFormatOverlay;
         }
-		virtual bool ValidPhysicalDevice( VkPhysicalDevice pVkPhysicalDevice ) const override
+		virtual bool ValidPhysicalDevice( VkPhysicalDevice pVkPhysicalDevice ) override
 		{
+			uint32_t supportedExtensionCount = 0;
+			g_device.vk.EnumerateDeviceExtensionProperties( pVkPhysicalDevice, NULL, &supportedExtensionCount, NULL );
+			std::vector<VkExtensionProperties> supportedExts(supportedExtensionCount);
+			g_device.vk.EnumerateDeviceExtensionProperties( pVkPhysicalDevice, NULL, &supportedExtensionCount, supportedExts.data() );
+
+			bool hasDrmProps = false;
+
+			for ( uint32_t i = 0; i < supportedExtensionCount; ++i ) {
+				if ( strcmp(supportedExts[i].extensionName, VK_EXT_PHYSICAL_DEVICE_DRM_EXTENSION_NAME) == 0 ) {
+					hasDrmProps = true;
+					break;
+				}
+			}
+
+			if (!hasDrmProps) {
+				drm_log.errorf( "physical device doesn't support VK_EXT_physical_device_drm" );
+				return false;
+			}
+
+			VkPhysicalDeviceDrmPropertiesEXT drmProps = {
+				.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRM_PROPERTIES_EXT,
+			};
+			VkPhysicalDeviceProperties2 props2 = {
+				.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
+				.pNext = &drmProps,
+			};
+			g_device.vk.GetPhysicalDeviceProperties2( pVkPhysicalDevice, &props2 );
+
+			if ( !drmProps.hasPrimary ) {
+				drm_log.errorf( "physical device has no primary node" );
+				return false;
+			}
+			m_drmPrimaryDevId = makedev( drmProps.primaryMajor, drmProps.primaryMinor );
+
+			if ( !drmProps.hasRender ) {
+				drm_log.errorf( "physical device has no render node" );
+				return false;
+			}
+			dev_t renderDevId = makedev( drmProps.renderMajor, drmProps.renderMinor );
+			drmDevice *drmDev = nullptr;
+			if (drmGetDeviceFromDevId(renderDevId, 0, &drmDev) != 0) {
+				drm_log.errorf( "drmGetDeviceFromDevId() failed" );
+				return false;
+			}
+			assert(drmDev->available_nodes & (1 << DRM_NODE_RENDER));
+			const char *drmRenderName = drmDev->nodes[DRM_NODE_RENDER];
+			m_drmRendererFd = open( drmRenderName, O_RDWR | O_CLOEXEC );
+			drmFreeDevice(&drmDev);
+			if ( m_drmRendererFd < 0 ) {
+				drm_log.errorf_errno( "failed to open DRM render node" );
+				return false;
+			}
+
 			return true;
 		}
 
@@ -3858,6 +3908,11 @@ namespace gamescope
 			WritePatchedEdid( GetCurrentConnector()->GetRawEDID(), GetCurrentConnector()->GetHDRInfo(), g_bRotated );
 		}
 
+		virtual int GetDrmRenderFD() const override
+		{
+			return m_drmRendererFd;
+		}
+
 	protected:
 
 		virtual void OnBackendBlobDestroyed( BackendBlob *pBlob ) override
@@ -3867,6 +3922,9 @@ namespace gamescope
 		}
 
 	private:
+		dev_t m_drmPrimaryDevId = 0;
+		int m_drmRendererFd = -1;
+
 		bool m_bWasCompositing = false;
 		bool m_bWasPartialCompsiting = false;
 		int m_nLastSingleOverlayZPos = 0;

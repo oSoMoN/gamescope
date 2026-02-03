@@ -316,7 +316,7 @@ namespace gamescope
         virtual std::span<const char *const> GetDeviceExtensions( VkPhysicalDevice pVkPhysicalDevice ) const = 0;
         virtual VkImageLayout GetPresentLayout() const = 0;
         virtual void GetPreferredOutputFormat( uint32_t *pPrimaryPlaneFormat, uint32_t *pOverlayPlaneFormat ) const = 0;
-        virtual bool ValidPhysicalDevice( VkPhysicalDevice pVkPhysicalDevice ) const = 0;
+        virtual bool ValidPhysicalDevice( VkPhysicalDevice pVkPhysicalDevice ) { return true; }
 
         virtual void DirtyState( bool bForce = false, bool bForceModeset = false ) = 0;
         virtual bool PollState() = 0;
@@ -393,6 +393,8 @@ namespace gamescope
         virtual bool NewlyInitted() = 0;
 
         virtual bool ShouldFitWindows() = 0;
+
+        virtual int GetDrmRenderFD() const { return -1; }
 
         static IBackend *Get();
         template <typename T>

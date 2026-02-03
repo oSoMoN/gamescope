@@ -645,7 +645,6 @@ namespace gamescope
         virtual std::span<const char *const> GetDeviceExtensions( VkPhysicalDevice pVkPhysicalDevice ) const override;
         virtual VkImageLayout GetPresentLayout() const override;
         virtual void GetPreferredOutputFormat( uint32_t *pPrimaryPlaneFormat, uint32_t *pOverlayPlaneFormat ) const override;
-        virtual bool ValidPhysicalDevice( VkPhysicalDevice pVkPhysicalDevice ) const override;
 
         virtual void DirtyState( bool bForce = false, bool bForceModeset = false ) override;
         virtual bool PollState() override;
@@ -2158,11 +2157,6 @@ namespace gamescope
 
         *pPrimaryPlaneFormat = u10BitFormat != DRM_FORMAT_INVALID ? u10BitFormat : u8BitFormat;
         *pOverlayPlaneFormat = u8BitFormat;
-    }
-
-    bool CWaylandBackend::ValidPhysicalDevice( VkPhysicalDevice pVkPhysicalDevice ) const
-    {
-        return true;
     }
 
     void CWaylandBackend::DirtyState( bool bForce, bool bForceModeset )
